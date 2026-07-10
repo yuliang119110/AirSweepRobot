@@ -1,0 +1,10 @@
+FROM isaac-sim-torch:6.0.1
+
+USER root
+RUN apt-get update -qq && apt-get install -y -qq git > /dev/null 2>&1 && rm -rf /var/lib/apt/lists/*
+
+RUN /isaac-sim/python.sh -m pip install --no-cache-dir \
+    "isaaclab==3.0.0b2.post1" \
+    "rsl-rl-lib==5.0.1" \
+    --extra-index-url https://pypi.nvidia.com/ \
+    -q

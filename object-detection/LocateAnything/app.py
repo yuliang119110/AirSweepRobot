@@ -50,6 +50,12 @@ class Config:
     # Warmup on startup
     WARMUP          = _env_bool("LA_WARMUP", True)
 
+    # Multi-shape warmup: comma-separated WxH pairs to pre-compile CUDA Graphs.
+    WARMUP_SHAPES   = os.environ.get(
+        "LA_WARMUP_SHAPES",
+        "1488x1024,1024x768,768x1024,1024x576,576x1024,552x384,640x425,1024x1024",
+    )
+
     # Server
     GRADIO_PORT     = int(os.environ.get("LA_PORT", "7860"))
 
@@ -323,20 +329,38 @@ class EagleWorker:
                     count += 1
         print(f"[L2] Quantized {count} weight tensors to FP8")
 
-    def warmup(self, image_size=(640, 480)):
-        """Run dummy inference to trigger kernel compilation and CUDA Graph capture."""
+    def warmup(self):
+        """Run dummy inference at multiple image shapes to pre-populate the
+        CUDA Graph / Dynamo cache for reduce-overhead compile mode.
+
+        Each unique pixel_values shape triggers a separate compilation under
+        mode='reduce-overhead'. By warming up common shapes at startup we
+        avoid a 30-40s recompilation stall on the user's first real request.
+        """
         from PIL import Image as _Image
         import numpy as _np
-        print("[Warmup] Running dummy inference...")
-        dummy = _Image.fromarray(
-            _np.random.randint(0, 255, (image_size[1], image_size[0], 3), dtype=_np.uint8)
-        )
-        try:
-            t0 = time.time()
-            self.generate(dummy, ["test"], Config.GENERATION_MODE)
-            print(f"[Warmup] Done in {time.time()-t0:.1f}s")
-        except Exception as e:
-            print(f"[Warmup] Note: {e}")
+
+        shapes = []
+        for pair in Config.WARMUP_SHAPES.split(","):
+            pair = pair.strip()
+            if "x" in pair:
+                w, h = pair.split("x")
+                shapes.append((int(w), int(h)))
+        if not shapes:
+            shapes.append((640, 480))
+
+        print(f"[Warmup] Pre-compiling {len(shapes)} shapes: {shapes}")
+        for i, (w, h) in enumerate(shapes):
+            dummy = _Image.fromarray(
+                _np.random.randint(0, 255, (h, w, 3), dtype=_np.uint8)
+            )
+            try:
+                t0 = time.time()
+                self.generate(dummy, ["test"], Config.GENERATION_MODE)
+                print(f"[Warmup] {i+1}/{len(shapes)} {w}x{h} done in {time.time()-t0:.1f}s")
+            except Exception as e:
+                print(f"[Warmup] {i+1}/{len(shapes)} {w}x{h}: {e}")
+        print("[Warmup] All shapes compiled")
 
 
     def build_messages(self, image, categories, question_override=None):
