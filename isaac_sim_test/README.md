@@ -1,116 +1,202 @@
 # Isaac Sim 仿真测试
 
-在 DGX 工作站（aarch64 / GB10 Tegra iGPU）上运行 NVIDIA Isaac Sim，验证 3D 物理场景渲染与交互。
+> 本目录在 DGX 工作站（aarch64, GB10/Tegra iGPU）上运行 NVIDIA Isaac Sim，
+> 验证 3D 物理场景渲染和 SO-ARM101 机械臂清洁场景的 RL 训练。
 
-## 环境要求
+---
+
+## 1. 环境准备
+
+**硬件 / 系统**
 
 | 项目 | 要求 |
 |------|------|
 | 硬件 | NVIDIA DGX（aarch64, GB10/Tegra iGPU） |
-| 操作系统 | Linux（已安装 NVIDIA 驱动） |
+| 系统 | Linux，已安装 NVIDIA 驱动 |
 | Docker | 支持 `--runtime=nvidia`（NVIDIA Container Toolkit） |
-| X11 | 本地显示 `:0`，`xhost +local:docker` 授权 |
+| 显示 | 本地物理显示器接在 `:0`，Isaac Sim 窗口直接渲染到屏幕 |
 
-## Docker 镜像
-
-本地已缓存以下两个版本，均可使用：
-
-- `nvcr.io/nvidia/isaac-sim:6.0.1`（17.5 GB）— 推荐使用
-- `nvcr.io/nvidia/isaac-sim:5.1.0`（19.6 GB）— 旧版本
-
-两个镜像均通过 `--entrypoint ""` + `/isaac-sim/python.sh` 方式直接运行 Python 脚本。
-
-## 快速开始
+**一次性环境检查**
 
 ```bash
-# 启动 6.0.1 场景（推荐）
-bash isaac_sim_test/launch_601.sh
-
-# 或启动 5.1.0 场景
-bash isaac_sim_test/launch_510.sh
-
-# 查看日志
-docker logs -f isaac_601_test
+docker info | grep -i runtime       # 应看到 nvidia
+nvidia-smi                          # GPU 可见
+echo $DISPLAY                       # 应为 :0
 ```
 
-容器以 detached 模式运行。日志出现以下两行即表示启动成功：
+**X11 授权**（每次重启 X 后执行一次）
 
+```bash
+xhost +local:docker
+```
+
+---
+
+## 2. 拉取镜像
+
+```bash
+docker pull nvcr.io/nvidia/isaac-sim:6.0.1    # 推荐，约 17.5 GB
+# 如需对比旧版本：
+docker pull nvcr.io/nvidia/isaac-sim:5.1.0    # 约 19.6 GB
+```
+
+清洁场景 RL 和查看器需要自定义镜像（基于 6.0.1 构建）：
+
+```bash
+docker build -t isaac-clean-rl:6.0.1 -f isaac_sim_test/Dockerfile.clean_rl .
+```
+
+---
+
+## 3. 启动（按用途选择）
+
+### 3.1 物理场景可视化（入门，推荐先跑这个）
+
+纯 USD + UsdPhysics 构建的物理场景：立方体塔、球体、圆柱、圆锥、地面、光照。
+物理引擎会启动，物体在重力下运动。
+
+```bash
+# Isaac Sim 6.0.1（推荐）
+bash isaac_sim_test/launch_601.sh
+
+# Isaac Sim 5.1.0（旧版本对比）
+bash isaac_sim_test/launch_510.sh
+```
+
+启动后看屏幕，约 25-30 秒后会出现 Isaac Sim 窗口，可看到 3D 物体。
+
+确认启动成功的日志标志：
 ```
 [xx.xxxs] Simulation App Startup Complete
 [xx.xxxs] app ready
 ```
 
-渲染画面会直接输出到本地显示器（`DISPLAY=:0`）。
+### 3.2 SO-ARM101 机械臂清洁场景 RL
 
-## 文件说明
+```bash
+# 随机策略可视化（首次验证推荐）
+bash isaac_sim_test/launch_clean_rl.sh random
 
-| 文件 | 用途 |
-|------|------|
-| [sim_test.py](sim_test.py) | 主测试脚本：纯 USD + UsdPhysics API 创建物理场景（立方体塔、球体、圆柱、圆锥、地面、光照） |
-| [launch_601.sh](launch_601.sh) | Isaac Sim 6.0.1 Docker 启动脚本 |
-| [launch_510.sh](launch_510.sh) | Isaac Sim 5.1.0 Docker 启动脚本 |
-| [launch_gui.sh](launch_gui.sh) | 直接启动 Isaac Sim GUI（无自定义脚本） |
-| [clean_scene.py](clean_scene.py) | SO-ARM101 机械臂清洁场景 RL 脚本 |
-| [clean_scene_viewer.py](clean_scene_viewer.py) | 清洁场景可视化查看器 |
-| [launch_clean_rl.sh](launch_clean_rl.sh) | 清洁场景 RL 训练启动脚本 |
-| [launch_clean_viewer.sh](launch_clean_viewer.sh) | 清洁场景查看器启动脚本 |
-| [Dockerfile.clean_rl](Dockerfile.clean_rl) | 清洁场景 RL 自定义镜像构建文件 |
+# 平滑正弦运动可视化（低 CPU 验证）
+bash isaac_sim_test/launch_clean_rl.sh motion
 
-## sim_test.py 场景内容
+# 推理（需要已训练的 checkpoint）
+bash isaac_sim_test/launch_clean_rl.sh play
 
-脚本通过 `SimulationApp({"headless": False})` 启动 GUI 模式，使用纯 USD API 构建：
+# RL 训练（headless，无窗口）
+bash isaac_sim_test/launch_clean_rl.sh train
+```
 
-- **物理场景**：重力 9.81 m/s^2，方向 -Z
-- **地面平面**：带碰撞的 `UsdGeom.Plane`，灰色
-- **堆叠立方体塔**：5 个橙色立方体（0.1m），带刚体+碰撞
-- **散布球体**：6 个蓝色球体（半径 0.06m），圆周分布
-- **散布圆柱**：4 个紫色圆柱，带刚体+碰撞
-- **装饰圆锥**：1 个黄色圆锥，无物理
-- **光照**：平行光（800 强度）+ 穹顶光（400 强度）
+训练时可调环境数：
+```bash
+NUM_ENVS=4 bash isaac_sim_test/launch_clean_rl.sh train
+```
 
-## 已知问题与修复记录
+### 3.3 机械臂清洁场景查看器（低 CPU）
 
-### 视口灰色/黑屏问题（已修复）
+纯 SimulationApp + USD API，加载机械臂模型并动画关节，CPU 占用更低：
 
-**现象**：Isaac Sim 视口渲染为灰色/黑色，看不到任何 3D 物体。
+```bash
+# 默认运行 clean_scene.py
+bash isaac_sim_test/launch_clean_viewer.sh
 
-**排查过程**：
+# 指定其他脚本
+SCRIPT=clean_scene_viewer.py bash isaac_sim_test/launch_clean_viewer.sh
+```
 
-1. 先后测试了 6.0.1 和 5.1.0 两个镜像版本 — 均出现相同问题，排除镜像版本因素。
-2. 检查 Docker 容器启动日志，发现脚本中 `omni.kit.commands.execute("Play")` 报未注册命令错误。
-3. 该命令在两个版本中均未注册，导致物理引擎无法启动，视口保持灰色。
+---
 
-**根因**：脚本 API 错误，不是容器版本问题。
+## 4. 启动后的操作
 
-**修复**：在 [sim_test.py](sim_test.py) 中：
+**查看日志**
+```bash
+docker logs -f isaac_601_test         # 物理场景
+docker logs -f isaac_clean_rl         # RL
+docker logs -f isaac_clean_viewer     # 查看器
+```
 
-1. 导入部分添加 `import omni.timeline`
-2. 将 `omni.kit.commands.execute("Play")` 替换为：
+**截图确认画面**
+```bash
+DISPLAY=:0 XAUTHORITY=/run/user/1000/gdm/Xauthority \
+  gnome-screenshot -f /tmp/screen.png
+```
+
+**停止容器**
+```bash
+docker stop isaac_601_test isaac_clean_rl isaac_clean_viewer
+```
+
+**进入运行中的容器**
+```bash
+docker exec -it isaac_601_test bash
+```
+
+---
+
+## 5. 常见问题
+
+### 视口灰色 / 黑屏（已修复）
+
+**现象**：Isaac Sim 窗口打开但视口一片灰色或黑色，看不到 3D 物体。
+
+**根因**：脚本里用了 `omni.kit.commands.execute("Play")`，该命令在 5.1.0 和 6.0.1
+中均未注册，物理引擎不启动，视口保持灰色。**不是镜像版本问题。**
+
+**修复**（已在 [sim_test.py](sim_test.py) 中应用）：
 
 ```python
+import omni.timeline
+
 timeline = omni.timeline.get_timeline_interface()
 timeline.play()
 ```
 
-修复后两个版本的镜像均可正常渲染。
+### Docker 报错：unknown flag --runtime
 
-## 截图验证
-
+未安装或未启用 NVIDIA Container Toolkit。安装后重启 Docker：
 ```bash
-# 在本地截图查看当前画面
-DISPLAY=:0 XAUTHORITY=/run/user/1000/gdm/Xauthority \
-  gnome-screenshot -f /tmp/screen_check.png
+sudo systemctl restart docker
 ```
 
-## 容器管理
+### 窗口不显示 / Cannot connect to display
 
+确认 `$DISPLAY` 为 `:0`，并已执行 `xhost +local:docker`。
+
+### 启动很慢
+
+首次启动需要 25-30 秒加载扩展，属正常。如果超过 60 秒，检查 `docker logs` 是否有报错。
+
+### GPU 显存不足
+
+清洁场景查看器已限制线程数为 4。如仍不足，减少 RL 环境数：
 ```bash
-# 停止容器
-docker stop isaac_601_test
-
-# 进入运行中的容器
-docker exec -it isaac_601_test bash
-
-# 查看实时日志
-docker logs -f isaac_601_test
+NUM_ENVS=1 bash isaac_sim_test/launch_clean_rl.sh train
 ```
+
+---
+
+## 6. 文件说明
+
+| 文件 | 说明 |
+|------|------|
+| [sim_test.py](sim_test.py) | 物理场景主脚本（纯 USD + UsdPhysics API） |
+| [launch_601.sh](launch_601.sh) | 物理场景启动 — Isaac Sim 6.0.1 |
+| [launch_510.sh](launch_510.sh) | 物理场景启动 — Isaac Sim 5.1.0 |
+| [clean_scene.py](clean_scene.py) | SO-ARM101 清洁场景脚本（加载机械臂 + 关节动画） |
+| [clean_scene_viewer.py](clean_scene_viewer.py) | 清洁场景可视化查看器 |
+| [launch_clean_rl.sh](launch_clean_rl.sh) | 清洁场景 RL 启动（random / motion / play / train） |
+| [launch_clean_viewer.sh](launch_clean_viewer.sh) | 清洁场景低 CPU 查看器启动 |
+| [launch_gui.sh](launch_gui.sh) | 直接启动 GUI（自定义镜像，旧脚本） |
+| [Dockerfile.clean_rl](Dockerfile.clean_rl) | 清洁场景 RL 镜像构建文件 |
+
+### sim_test.py 场景内容
+
+| 元素 | 说明 |
+|------|------|
+| 物理场景 | 重力 9.81 m/s^2，方向 -Z |
+| 地面 | 带碰撞的 `UsdGeom.Plane`，灰色 |
+| 立方体塔 | 5 个橙色立方体（0.1m），刚体 + 碰撞 |
+| 球体 | 6 个蓝色球体（半径 0.06m），圆周分布 |
+| 圆柱 | 4 个紫色圆柱，刚体 + 碰撞 |
+| 圆锥 | 1 个黄色圆锥，装饰无物理 |
+| 光照 | 平行光 800 + 穹顶光 400 |
