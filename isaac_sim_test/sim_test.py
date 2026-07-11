@@ -11,6 +11,7 @@ simulation_app = SimulationApp({"headless": False})
 from pxr import UsdGeom, UsdPhysics, UsdLux, UsdShade, Sdf, Gf
 import omni.usd
 import omni.kit.commands
+import omni.timeline
 
 
 def create_material(stage, path, color):
@@ -106,8 +107,9 @@ def setup_scene():
 
 setup_scene()
 
-# 启动物理仿真
-omni.kit.commands.execute("Play")
+# 启动物理仿真 (使用 timeline 接口，兼容 5.1.0 和 6.0.1)
+timeline = omni.timeline.get_timeline_interface()
+timeline.play()
 
 frame = 0
 while simulation_app.is_running():
