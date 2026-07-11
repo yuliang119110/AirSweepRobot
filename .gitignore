@@ -1,3 +1,36 @@
 object-detection/hf_cache/
 __pycache__/
 *.pyc
+
+# Large binary assets
+*.usdz
+*.usd
+*.usdc
+*.usdc
+*.stl
+*.obj
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.avi
+
+# Model checkpoints / data
+*.pth
+*.pt
+*.pkl
+*.onnx
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Docker
+*.log
+
+# Generated
+generated/
+Log/
+test3.2.7/blander/isaac_sim_input/
